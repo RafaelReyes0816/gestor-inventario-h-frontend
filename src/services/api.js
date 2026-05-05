@@ -1,11 +1,9 @@
 import axios from 'axios'
 
-// En Vercel: variable VITE_API_URL = https://tu-servicio.up.railway.app (sin /api al final)
-const envUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
-const baseURL = envUrl ? `${envUrl}/api` : 'http://localhost:5003/api'
+const base = import.meta.env.VITE_API_URL || 'http://localhost:5003'
 
 const api = axios.create({
-  baseURL,
+  baseURL: `${base.replace(/\/$/, '')}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
