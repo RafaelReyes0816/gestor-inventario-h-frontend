@@ -19,6 +19,7 @@ export default function CampoSelect({
   label, name, value, onChange,
   fetchFn, getLabel, getValue,
   requerido = false,
+  error,
 }) {
   const [opciones, setOpciones] = useState([])
   const [cargando, setCargando] = useState(true)
@@ -51,7 +52,7 @@ export default function CampoSelect({
         style={{
           padding: '9px 12px',
           borderRadius: '8px',
-          border: '1px solid #d1d5db',
+          border: error ? '1px solid #ef4444' : '1px solid #d1d5db',
           fontSize: '14px',
           color: value ? '#111827' : '#9ca3af',
           background: '#fafafa',
@@ -64,8 +65,8 @@ export default function CampoSelect({
           paddingRight: '36px',
           transition: 'border-color 0.15s',
         }}
-        onFocus={e => e.target.style.borderColor = '#0369a1'}
-        onBlur={e => e.target.style.borderColor = '#d1d5db'}
+        onFocus={e => { e.target.style.borderColor = '#0369a1' }}
+        onBlur={e => { e.target.style.borderColor = error ? '#ef4444' : '#d1d5db' }}
       >
         <option value="">
           {cargando ? 'Cargando...' : `— Seleccionar ${label.toLowerCase()} —`}
@@ -76,6 +77,9 @@ export default function CampoSelect({
           </option>
         ))}
       </select>
+      {error && (
+        <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>{error}</span>
+      )}
     </div>
   )
 }

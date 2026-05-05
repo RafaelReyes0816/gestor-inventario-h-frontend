@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { postMovimiento, postDetalle, getStockActual, getUsuarios, getInsumos, getAlmacenes, getProveedores, getSuministros, getDistribuciones } from '../services/crudService'
+import { mensajeDesdeAxios, erroresCamposDesdeAxios } from '../utils/mensajeErrorApi'
+import { validarStockMovimiento } from '../utils/validacionesStock'
 
 // Genera un código único combinando timestamp + sufijo aleatorio
 const genCodigo = (prefix) =>
@@ -20,6 +22,7 @@ export default function StockPage() {
   const [form, setForm]           = useState(FORM_INIT)
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje]     = useState(null)
+  const [fieldErrors, setFieldErrors] = useState({})
   const [stock, setStock]         = useState([])
   const [cargandoStock, setCargandoStock] = useState(true)
   const [filtro, setFiltro]       = useState('')
@@ -96,10 +99,26 @@ export default function StockPage() {
     setTimeout(() => setMensaje(null), 4000)
   }
 
-  const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+  const handleChange = (e) => {
+    const { name } = e.target
+    setForm(prev => ({ ...prev, [name]: e.target.value }))
+    setFieldErrors(prev => {
+      if (!prev[name]) return prev
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
+  }
 
   // Al cambiar el insumo, limpiar almacén y proveedor para que se recalculen
   const handleInsumoChange = (e) => {
+    setFieldErrors(prev => {
+      const next = { ...prev }
+      delete next.codigoInsumo
+      delete next.codigoAlmacen
+      delete next.codigoProveedor
+      return next
+    })
     setForm(prev => ({ ...prev, codigoInsumo: e.target.value, codigoAlmacen: '', codigoProveedor: '' }))
   }
 
@@ -107,17 +126,13 @@ export default function StockPage() {
 
   const registrar = async (e) => {
     e.preventDefault()
-    const camposBase = !form.codigoUsuario || !form.codigoInsumo ||
-                       !form.codigoAlmacen || !form.codigoProveedor || !form.cantidad
-    const faltaEntrada = esEntrada && (!form.lote || !form.fechaVencimiento)
-    if (camposBase || faltaEntrada) {
-      mostrarMensaje('Completá todos los campos requeridos', 'error')
+    const locales = validarStockMovimiento(form, esEntrada)
+    if (Object.keys(locales).length > 0) {
+      setFieldErrors(locales)
+      mostrarMensaje('Revisá los campos marcados.', 'error')
       return
     }
-    if (Number(form.cantidad) <= 0) {
-      mostrarMensaje('La cantidad debe ser mayor a cero', 'error')
-      return
-    }
+    setFieldErrors({})
 
     setGuardando(true)
     try {
@@ -142,10 +157,13 @@ export default function StockPage() {
 
       mostrarMensaje(`${form.tipo} registrada correctamente (${form.cantidad} unidades de ${form.codigoInsumo})`)
       setForm(FORM_INIT)
+      setFieldErrors({})
       cargarStock()
     } catch (err) {
-      const msg = err.response?.data?.mensaje || 'Error al registrar el movimiento'
-      mostrarMensaje(msg, 'error')
+      const delServidor = erroresCamposDesdeAxios(err)
+      if (Object.keys(delServidor).length > 0)
+        setFieldErrors(prev => ({ ...prev, ...delServidor }))
+      mostrarMensaje(mensajeDesdeAxios(err), 'error')
     } finally {
       setGuardando(false)
     }
@@ -191,7 +209,10 @@ export default function StockPage() {
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setForm(p => ({ ...p, tipo: t }))}
+                  onClick={() => {
+                    setForm(p => ({ ...p, tipo: t }))
+                    setFieldErrors({})
+                  }}
                   style={{
                     flex: 1, padding: '10px', border: '2px solid',
                     borderColor: form.tipo === t
@@ -220,6 +241,7 @@ export default function StockPage() {
             getLabel={(u) => `${u.codigo} — ${u.nombre} (${u.rol})`}
             getValue={(u) => u.codigo}
             onChange={handleChange}
+            error={fieldErrors.codigoUsuario}
           />
           <Select
             label="Insumo"    name="codigoInsumo"    value={form.codigoInsumo}
@@ -227,6 +249,7 @@ export default function StockPage() {
             getLabel={(i) => `${i.codigo} — ${i.nombre}`}
             getValue={(i) => i.codigo}
             onChange={handleInsumoChange}
+            error={fieldErrors.codigoInsumo}
           />
           <SelectOpciones
             label="Almacén"
@@ -238,6 +261,7 @@ export default function StockPage() {
             getLabel={(a) => `${a.codigo} — ${a.nombre}`}
             getValue={(a) => a.codigo}
             onChange={handleChange}
+            error={fieldErrors.codigoAlmacen}
           />
           <SelectOpciones
             label="Proveedor"
@@ -249,10 +273,11 @@ export default function StockPage() {
             getLabel={(p) => `${p.codigo} — ${p.nombre}`}
             getValue={(p) => p.codigo}
             onChange={handleChange}
+            error={fieldErrors.codigoProveedor}
           />
           {esEntrada && (
             <>
-              <Campo label="Lote" name="lote" value={form.lote} onChange={handleChange} placeholder="LOTE-A" />
+              <Campo label="Lote" name="lote" value={form.lote} onChange={handleChange} placeholder="LOTE-A" error={fieldErrors.lote} />
               <div>
                 <label style={labelStyle}>Fecha de vencimiento</label>
                 <input
@@ -260,8 +285,16 @@ export default function StockPage() {
                   name="fechaVencimiento"
                   value={form.fechaVencimiento}
                   onChange={handleChange}
-                  style={inputStyle}
+                  style={{
+                    ...inputStyle,
+                    border: `1px solid ${fieldErrors.fechaVencimiento ? '#ef4444' : '#d1d5db'}`,
+                  }}
                 />
+                {fieldErrors.fechaVencimiento && (
+                  <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+                    {fieldErrors.fechaVencimiento}
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -272,12 +305,21 @@ export default function StockPage() {
               type="number"
               name="cantidad"
               min="1"
+              step="1"
               value={form.cantidad}
               onChange={handleChange}
               placeholder="50"
-              style={{ ...inputStyle, fontSize: '18px', fontWeight: 700,
-                color: form.tipo === 'Entrada' ? '#16a34a' : '#dc2626' }}
+              style={{
+                ...inputStyle, fontSize: '18px', fontWeight: 700,
+                color: form.tipo === 'Entrada' ? '#16a34a' : '#dc2626',
+                borderColor: fieldErrors.cantidad ? '#ef4444' : '#d1d5db',
+              }}
             />
+            {fieldErrors.cantidad && (
+              <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+                {fieldErrors.cantidad}
+              </span>
+            )}
           </div>
 
           <button
@@ -388,7 +430,7 @@ export default function StockPage() {
 }
 
 // ── Select controlado por el padre (sin fetch interno) ───────────────────────
-function SelectOpciones({ label, name, value, onChange, opciones, cargando, filtrado, getLabel, getValue }) {
+function SelectOpciones({ label, name, value, onChange, opciones, cargando, filtrado, getLabel, getValue, error }) {
   return (
     <div>
       <label style={labelStyle}>{label}</label>
@@ -405,7 +447,7 @@ function SelectOpciones({ label, name, value, onChange, opciones, cargando, filt
           backgroundRepeat: 'no-repeat',
           backgroundPosition: 'right 12px center',
           paddingRight: '36px',
-          borderColor: filtrado ? '#a5f3fc' : '#d1d5db',
+          borderColor: error ? '#ef4444' : filtrado ? '#a5f3fc' : '#d1d5db',
           background:  filtrado ? '#f0fdff' : '#fafafa',
         }}
       >
@@ -418,7 +460,12 @@ function SelectOpciones({ label, name, value, onChange, opciones, cargando, filt
           </option>
         ))}
       </select>
-      {filtrado && opciones?.length > 0 && (
+      {error && (
+        <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+          {error}
+        </span>
+      )}
+      {filtrado && opciones?.length > 0 && !error && (
         <span style={{ fontSize: '11px', color: '#0891b2', marginTop: '3px', display: 'block' }}>
           Filtrado por insumo seleccionado ({opciones.length} opción{opciones.length !== 1 ? 'es' : ''})
         </span>
@@ -428,7 +475,7 @@ function SelectOpciones({ label, name, value, onChange, opciones, cargando, filt
 }
 
 // ── Campo de texto simple ────────────────────────────────────────────────────
-function Campo({ label, name, value, onChange, placeholder }) {
+function Campo({ label, name, value, onChange, placeholder, error }) {
   return (
     <div>
       <label style={labelStyle}>{label}</label>
@@ -438,14 +485,22 @@ function Campo({ label, name, value, onChange, placeholder }) {
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        style={inputStyle}
+        style={{
+          ...inputStyle,
+          border: `1px solid ${error ? '#ef4444' : '#d1d5db'}`,
+        }}
       />
+      {error && (
+        <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+          {error}
+        </span>
+      )}
     </div>
   )
 }
 
 // ── Select con carga dinámica desde API (o con opciones externas) ─────────────
-function Select({ label, name, value, onChange, fetchFn, opciones: opcionesExternas, getLabel, getValue }) {
+function Select({ label, name, value, onChange, fetchFn, opciones: opcionesExternas, getLabel, getValue, error }) {
   const [opcionesInternas, setOpcionesInternas] = useState([])
   const [cargando, setCargando]                 = useState(true)
   const fetchRef                                = useRef(fetchFn)
@@ -482,7 +537,7 @@ function Select({ label, name, value, onChange, fetchFn, opciones: opcionesExter
           backgroundRepeat: 'no-repeat',
           backgroundPosition: 'right 12px center',
           paddingRight: '36px',
-          borderColor: esFiltrado ? '#a5f3fc' : '#d1d5db',
+          border: `1px solid ${error ? '#ef4444' : esFiltrado ? '#a5f3fc' : '#d1d5db'}`,
           background:  esFiltrado ? '#f0fdff' : '#fafafa',
         }}
       >
@@ -499,6 +554,11 @@ function Select({ label, name, value, onChange, fetchFn, opciones: opcionesExter
           </option>
         ))}
       </select>
+      {error && (
+        <span style={{ fontSize: '12px', color: '#dc2626', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+          {error}
+        </span>
+      )}
     </div>
   )
 }

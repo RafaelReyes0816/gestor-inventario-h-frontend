@@ -3,6 +3,8 @@ import Modal from '../components/Modal'
 import Tabla from '../components/Tabla'
 import Campo from '../components/Campo'
 import CampoSelect from '../components/CampoSelect'
+import { mensajeDesdeAxios, erroresCamposDesdeAxios } from '../utils/mensajeErrorApi'
+import { validarGestion } from '../utils/validacionesGestion'
 import {
   getCategorias, postCategoria, putCategoria, deleteCategoria,
   getProveedores, postProveedor, putProveedor, deleteProveedor,
@@ -290,6 +292,7 @@ function TablaEntidad({ entidad }) {
   const [form, setForm]         = useState({})
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje]   = useState(null)
+  const [fieldErrors, setFieldErrors] = useState({})
 
   const cargar = useCallback(() => {
     setCargando(true)
@@ -307,22 +310,40 @@ function TablaEntidad({ entidad }) {
   }
 
   const abrirCrear = () => {
+    setFieldErrors({})
     setForm(entidad.initCreate)
     setModal('crear')
   }
 
   const abrirEditar = (row) => {
     if (entidad.sinEdicion || !entidad.initUpdate) return
+    setFieldErrors({})
     setFilaActual(row)
     setForm(entidad.initUpdate(row))
     setModal('editar')
   }
 
-  const cerrarModal = () => { setModal(null); setFilaActual(null) }
+  const cerrarModal = () => { setModal(null); setFilaActual(null); setFieldErrors({}) }
 
-  const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+  const handleChange = (e) => {
+    const { name } = e.target
+    setForm(prev => ({ ...prev, [name]: e.target.value }))
+    setFieldErrors(prev => {
+      if (!prev[name]) return prev
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
+  }
 
   const guardar = async () => {
+    const locales = validarGestion(entidad.key, modal, form)
+    if (Object.keys(locales).length > 0) {
+      setFieldErrors(locales)
+      mostrarMensaje('Revisá los campos marcados.', 'error')
+      return
+    }
+    setFieldErrors({})
     setGuardando(true)
     try {
       if (modal === 'crear') {
@@ -335,8 +356,10 @@ function TablaEntidad({ entidad }) {
       cerrarModal()
       cargar()
     } catch (err) {
-      const msg = err.response?.data?.mensaje || 'Error al guardar'
-      mostrarMensaje(msg, 'error')
+      const delServidor = erroresCamposDesdeAxios(err)
+      if (Object.keys(delServidor).length > 0)
+        setFieldErrors(prev => ({ ...prev, ...delServidor }))
+      mostrarMensaje(mensajeDesdeAxios(err), 'error')
     } finally {
       setGuardando(false)
     }
@@ -349,8 +372,7 @@ function TablaEntidad({ entidad }) {
       mostrarMensaje('Registro desactivado correctamente')
       cargar()
     } catch (err) {
-      const msg = err.response?.data?.mensaje || 'Error al eliminar'
-      mostrarMensaje(msg, 'error')
+      mostrarMensaje(mensajeDesdeAxios(err), 'error')
     }
   }
 
@@ -448,6 +470,7 @@ function TablaEntidad({ entidad }) {
                 getLabel={c.getLabel}
                 getValue={c.getValue}
                 requerido
+                error={fieldErrors[c.name]}
               />
             ) : (
               <Campo
@@ -459,6 +482,7 @@ function TablaEntidad({ entidad }) {
                 onChange={handleChange}
                 type={c.type ?? 'text'}
                 requerido
+                error={fieldErrors[c.name]}
               />
             )
           )}
